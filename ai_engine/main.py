@@ -3,7 +3,6 @@ import time
 import json
 import os
 import concurrent.futures
-import google.generativeai as genai
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -12,49 +11,71 @@ from geopy.geocoders import ArcGIS
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app)
 
-@app.after_request
-def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
-    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
-    return response
-
-# Ensure this matches your Railway Variable name
 API_KEY = os.getenv("GOOGLE_API_KEY")
-genai.configure(api_key=API_KEY)
 
 MODEL_CHAIN = [
     'models/gemini-2.0-flash-lite-preview-02-05', 
     'models/gemini-flash-latest',               
-    'models/gemini-2.5-flash-lite',              
+    'models/gemini-2.5-flash-lite',               
     'models/gemini-2.0-flash',                   
     'models/gemini-exp-1206',                    
-    'models/gemini-pro-latest'                   
+    'models/gemini-pro-latest'                    
 ]
 
 def fetch_activity_details(activity, location_context):
+    place_name = activity.get('place')
+    if not place_name:
+        return activity
+
+    image_url = None
     try:
-        place_name = activity.get('place', 'Point of Interest')
         clean_query = place_name.split('(')[0].strip()
-        activity['image'] = f"[https://loremflickr.com/800/600/](https://loremflickr.com/800/600/){clean_query.replace(' ', ',')},travel/all"
-        try:
-            wiki_url = "[https://en.wikipedia.org/w/api.php](https://en.wikipedia.org/w/api.php)"
-            params = {"action": "query", "format": "json", "generator": "search", "gsrsearch": clean_query, "gsrlimit": 1, "prop": "pageimages", "piprop": "thumbnail", "pithumbsize": 800}
-            res = requests.get(wiki_url, params=params, timeout=1.5)
-            pages = res.json().get("query", {}).get("pages", {})
-            for _, page_data in pages.items():
-                if "thumbnail" in page_data:
-                    activity['image'] = page_data["thumbnail"]["source"]
-        except: pass
-        if not activity.get('coords') or activity['coords'] == [0.0, 0.0]:
+        url = "https://en.wikipedia.org/w/api.php"
+        params = {
+            "action": "query",
+            "format": "json",
+            "generator": "search",
+            "gsrsearch": clean_query,
+            "gsrlimit": 1,
+            "prop": "pageimages",
+            "piprop": "thumbnail",
+            "pithumbsize": 800
+        }
+        headers = {'User-Agent': 'VoyagerAI/1.0'}
+        response = requests.get(url, params=params, headers=headers, timeout=2)
+        data = response.json()
+        pages = data.get("query", {}).get("pages", {})
+        for _, page_data in pages.items():
+            if "thumbnail" in page_data:
+                image_url = page_data["thumbnail"]["source"]
+    except Exception:
+        pass
+
+    if not image_url:
+        image_url = f"https://loremflickr.com/800/600/{clean_query.replace(' ', ',')},travel/all"
+    
+    activity['image'] = image_url
+
+    try:
+        if 'coords' not in activity or activity['coords'] == [0.0, 0.0]:
+            geolocator = ArcGIS(user_agent="VoyagerAI_App")
+            search_query = f"{clean_query}, {location_context}"
             try:
-                geolocator = ArcGIS(user_agent="VoyagerAI_v1")
-                loc = geolocator.geocode(f"{clean_query}, {location_context}, India", timeout=2)
-                activity['coords'] = [loc.latitude, loc.longitude] if loc else [0.0, 0.0]
-            except: activity['coords'] = [0.0, 0.0]
-    except: pass
+                loc = geolocator.geocode(search_query, timeout=3)
+                if loc:
+                    activity['coords'] = [loc.latitude, loc.longitude]
+                else:
+                    loc = geolocator.geocode(clean_query, timeout=3)
+                    if loc:
+                        activity['coords'] = [loc.latitude, loc.longitude]
+            except Exception:
+                pass
+    except Exception:
+        if 'coords' not in activity:
+            activity['coords'] = [0.0, 0.0]
+
     return activity
 
 @app.route('/', methods=['GET'])
@@ -65,36 +86,102 @@ def home():
 def generate_itinerary():
     try:
         data = request.json
-        if not data: return jsonify({"error": "No data"}), 400
-        location, days = data.get('location', 'India'), data.get('days', 3)
-        people, budget = data.get('people', 1), data.get('total_budget', 'Flexible')
-        
-        prompt = f"Plan {days} days in {location} for {people} (Budget: {budget}). Return ONLY JSON: {{'trip_name': '', 'total_budget': '', 'itinerary': [{{'day': 1, 'activities': [{{'id': '1', 'time': 'Morning', 'place': '', 'desc': '', 'cost': 0, 'duration': 60, 'priority': 'high', 'energy': 'medium', 'coords': [0,0]}}]}}]}}"
-        
-        last_error = "Unknown"
+        location = data.get('location')
+        days = data.get('days')
+        budget_tier = data.get('budget_tier', 'Medium') 
+        people = data.get('people', 1)
+        vibe = ", ".join(data.get('vibe', []))
+        total_budget = data.get('total_budget', 'Flexible') 
+
+        budget_instruction = ""
+        if budget_tier == "Luxury":
+            budget_instruction = "Select premium 5-star hotels, fine dining, private transport, and exclusive experiences."
+        elif budget_tier == "Budget":
+            budget_instruction = "Select hostels, street food/affordable cafes, public transport, and free/cheap attractions. Keep costs strictly low."
+        else:
+            budget_instruction = "Select balanced 3-4 star hotels, good local restaurants, and mix of paid/free activities."
+
+        prompt = f"""
+        Act as a travel planner creating a {budget_tier.upper()} class trip.
+        Destination: {location} | Duration: {days} Days | Travelers: {people}
+        Vibe: {vibe}
+
+        TOTAL TRIP BUDGET: {total_budget} INR.
+        IMPORTANT: This budget is for the ENTIRE GROUP of {people} people combined. 
+        Do NOT assume this is per person. The sum of all activity costs multiplied by {people} should ideally stay under {total_budget}.
+
+        STRICT BUDGET RULE: {budget_instruction}
+
+        CRITICAL DATA RULES:
+        1. **id**: Unique string.
+        2. **duration**: Time in MINUTES.
+        3. **priority**: "high", "medium", "low".
+        4. **energy**: "high", "medium", "low".
+        5. **cost**: Estimated cost for this activity PER PERSON in INR.
+        6. **coords**: [Latitude, Longitude] or [0,0].
+
+        JSON SCHEMA:
+        {{
+            "trip_name": "Creative Trip Title",
+            "total_budget": "Estimated Total Cost for Group",
+            "itinerary": [
+                {{
+                    "day": 1,
+                    "activities": [
+                        {{ 
+                            "id": "act_1",
+                            "time": "Morning", 
+                            "place": "Name", 
+                            "desc": "Short description", 
+                            "cost": 0, 
+                            "duration": 60,
+                            "priority": "high",
+                            "energy": "medium",
+                            "coords": [0.0, 0.0] 
+                        }}
+                    ]
+                }}
+            ]
+        }}
+        """
+
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": { 
+                "temperature": 0.4, 
+                "maxOutputTokens": 8000,
+                "response_mime_type": "application/json"
+            }
+        }
+
         for model_name in MODEL_CHAIN:
+            url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
             try:
-                # Using the SDK prevents the "Expecting value" error entirely
-                model = genai.GenerativeModel(
-                    model_name,
-                    generation_config={"response_mime_type": "application/json"}
-                )
-                
-                response = model.generate_content(prompt)
-                
-                # The SDK handles the parsing safety for us
-                trip_data = json.loads(response.text)
-                
-                all_acts = [act for day in trip_data.get('itinerary', []) for act in day.get('activities', [])]
-                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                    executor.map(lambda act: fetch_activity_details(act, location), all_acts)
-                
-                return jsonify(trip_data)
-            except Exception as inner_e:
-                last_error = str(inner_e)
+                response = requests.post(url, headers=headers, json=payload, timeout=30)
+                if response.status_code == 200:
+                    raw_text = response.json()['candidates'][0]['content']['parts'][0]['text']
+                    clean_text = raw_text.replace("```json", "").replace("```", "").strip()
+                    trip_data = json.loads(clean_text)
+                    
+                    all_activities = []
+                    if "itinerary" in trip_data:
+                        for day in trip_data['itinerary']:
+                            for activity in day.get('activities', []):
+                                all_activities.append(activity)
+                    
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                        futures = [executor.submit(fetch_activity_details, act, location) for act in all_activities]
+                        concurrent.futures.wait(futures)
+
+                    return jsonify(trip_data)
+                elif response.status_code == 429:
+                    continue
+            except Exception:
                 continue
-                
-        return jsonify({"error": f"AI Failure: {last_error}"}), 503
+
+        return jsonify({"error": "Busy. Try again."}), 500
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
