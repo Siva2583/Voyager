@@ -98,54 +98,53 @@ def generate_itinerary():
 
         budget_instruction = ""
         if budget_tier == "Luxury":
-            budget_instruction = "Select premium 5-star hotels, fine dining, private transport, and exclusive experiences."
+            budget_instruction = "Focus on premium 5-star experiences, private chauffeurs, and high-end dining."
         elif budget_tier == "Budget":
-            budget_instruction = "Select hostels, street food/affordable cafes, public transport, and free/cheap attractions. Keep costs strictly low."
+            budget_instruction = "Focus on affordable street food, hostels, and public transport. Keep individual activity costs minimal."
         else:
-            budget_instruction = "Select balanced 3-4 star hotels, good local restaurants, and mix of paid/free activities."
+            budget_instruction = "Balanced mix of comfortable hotels and standard local dining."
 
-        # THE BEST PROMPT: Added strict geographic constraint to stop location mixing
+        # REALISTIC PROMPT: Strict location lock and logic-first generation
         prompt = f"""
-        Act as an expert local travel guide for {location.upper()}.
-        Your mission is to create a {budget_tier.upper()} class trip.
-
-        STRICT GEOGRAPHIC BOUNDARY: 
-        All activities MUST be physically located within {location} or its immediate 20km radius. 
-        DO NOT suggest places in other cities or states (e.g., if the user asks for Tirupati, do NOT suggest Goa).
+        Act as a professional, hyper-local travel consultant for {location}.
         
-        TRIP DATA:
-        Destination: {location} | Duration: {days} Days | Travelers: {people} | Vibe: {vibe}
-        TOTAL TRIP BUDGET: {total_budget} INR for the group.
+        STRICT COMMAND: Your output must be 100% specific to {location}. 
+        If you suggest a place that is not physically within or immediately adjacent to {location}, the itinerary is considered a failure. 
+        Example: If location is Tirupati, do NOT mention Goa, beaches in North India, or unrelated monuments.
 
-        BUDGET MATH: {budget_instruction}
-        The sum of (activity cost * {people}) must be <= {total_budget}.
+        TRIP SPECIFICATIONS:
+        - Target City: {location}
+        - Duration: {days} Days
+        - Group Size: {people} People
+        - Style: {vibe}
+        - Total Budget for Group: {total_budget} INR
+        - Class: {budget_tier} ({budget_instruction})
 
-        DATA SCHEMA RULES:
-        1. **id**: Unique string.
-        2. **duration**: Time in MINUTES.
-        3. **priority**: "high", "medium", "low".
-        4. **energy**: "high", "medium", "low".
-        5. **cost**: PER PERSON cost in INR.
-        6. **coords**: [Latitude, Longitude].
+        EXECUTION RULES:
+        1. Only include REAL, verified landmarks and establishments in {location}.
+        2. Ensure the "cost" field is a realistic PER PERSON estimate in INR for that specific activity.
+        3. All "coords" must be accurate [lat, lng] for the specific spots in {location}.
+        4. "total_budget" in the JSON must reflect the actual sum of all activities for {people} people.
 
+        OUTPUT FORMAT: Return ONLY a clean JSON object. No conversational text.
         JSON SCHEMA:
         {{
-            "trip_name": "Unique title for {location}",
-            "total_budget": "Total calculated cost for {people} people",
+            "trip_name": "A professional title for a {days}-day trip to {location}",
+            "total_budget": "Calculated total for {people} people",
             "itinerary": [
                 {{
                     "day": 1,
                     "activities": [
                         {{ 
-                            "id": "act_1",
-                            "time": "Morning", 
-                            "place": "Real place in {location}", 
-                            "desc": "Local insight about this place", 
+                            "id": "unique_id",
+                            "time": "e.g. 09:00 AM", 
+                            "place": "Exact Name", 
+                            "desc": "2-sentence detailed insight including local tips", 
                             "cost": 0, 
-                            "duration": 60,
+                            "duration": 90,
                             "priority": "high",
                             "energy": "medium",
-                            "coords": [0.0, 0.0] 
+                            "coords": [lat, lng]
                         }}
                     ]
                 }}
@@ -157,22 +156,20 @@ def generate_itinerary():
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": { 
-                "temperature": 0.2, # Lower temperature = more factual, less "creative" drifting
+                "temperature": 0.1, # Lowest temperature for maximum factual accuracy
                 "maxOutputTokens": 8000,
                 "response_mime_type": "application/json"
             }
         }
 
         for model_name in MODEL_CHAIN:
-            print(f"Trying model: {model_name}...")
+            print(f"Executing with model: {model_name}...")
             url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
             try:
-                response = requests.post(url, headers=headers, json=payload, timeout=35)
+                response = requests.post(url, headers=headers, json=payload, timeout=40)
                 if response.status_code == 200:
-                    res_json = response.json()
-                    raw_text = res_json['candidates'][0]['content']['parts'][0]['text']
-                    clean_text = raw_text.replace("```json", "").replace("```", "").strip()
-                    trip_data = json.loads(clean_text)
+                    raw_text = response.json()['candidates'][0]['content']['parts'][0]['text']
+                    trip_data = json.loads(raw_text.strip())
                     
                     all_activities = []
                     if "itinerary" in trip_data:
@@ -180,6 +177,7 @@ def generate_itinerary():
                             for activity in day.get('activities', []):
                                 all_activities.append(activity)
                     
+                    # Fetching images and verifying coords via ArcGIS
                     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                         futures = [executor.submit(fetch_activity_details, act, location) for act in all_activities]
                         concurrent.futures.wait(futures)
@@ -190,7 +188,7 @@ def generate_itinerary():
             except Exception:
                 continue
 
-        return jsonify({"error": "Busy. Try again."}), 500
+        return jsonify({"error": "Engine Timeout. Please retry."}), 500
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
