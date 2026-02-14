@@ -62,35 +62,38 @@ def generate_itinerary():
         people, vibe = data.get('people', 1), ", ".join(data.get('vibe', []))
         budget_tier, total_budget = data.get('budget_tier', 'Medium'), data.get('total_budget', 'Flexible')
 
-        # NEW HYPER-REALISTIC PROMPT
         prompt = f"""
-        Act as a professional local travel consultant based in {location} with 10 years of experience.
-        You are designing a {days}-day realistic itinerary for {people} people with a {budget_tier} budget ({total_budget} INR).
+        Act as a professional local travel consultant in {location}. 
+        Create a COMPLETE {days}-day "everything included" itinerary for {people} people.
+        Budget: {budget_tier} ({total_budget} INR).
 
-        STRICT REALISM RULES:
-        1. NEIGHBORHOOD GROUPING: Group all activities each day within the SAME neighborhood or district to minimize transit time.
-        2. BUFFER TIME: Include realistic transit/wait times (30-60 mins) between activities. 
-        3. LOGICAL FLOW: Start the day at a major landmark and move to nearby hidden gems.
-        4. LOCAL PRO-TIPS: In each 'desc', include a 1-sentence local tip (e.g., 'Best time to visit', 'Hidden entrance', 'What to order').
-        5. GEOGRAPHIC LOCK: Only include places physically inside {location}. No hallucinations.
+        STRICT REALISM & CONTENT RULES:
+        1. INCLUDE EVERYTHING: Every day MUST include:
+           - A specific verified Hotel/Resort for 'Check-in & Rest'.
+           - Specific local Restaurants for 'Breakfast', 'Lunch', and 'Dinner'.
+           - 2-3 Sightseeing activities.
+        2. NEIGHBORHOOD LOCK: Group the hotel, restaurants, and activities in the same area each day to avoid traffic.
+        3. REAL PLACES ONLY: Use real, verified hotels and eateries in {location}.
+        4. COST ACCURACY: 'cost' must be a realistic estimate PER PERSON for that specific meal or hotel stay in {location}.
+        5. LOCAL TIPS: In each 'desc', tell them exactly what to order at the restaurant or the best room type at the hotel.
 
         DATA SCHEMA:
         {{
-            "trip_name": "A realistic title for {location}",
-            "total_budget": "Estimated total cost for {people} travelers",
+            "trip_name": "Full Experience: {location}",
+            "total_budget": "Total calculated cost for {people} travelers",
             "itinerary": [
                 {{
                     "day": 1,
                     "activities": [
                         {{ 
                             "id": "unique_id",
-                            "time": "e.g. 09:00 AM", 
-                            "place": "Verified Landmark Name", 
-                            "desc": "Detailed description plus a local pro-tip.", 
+                            "time": "08:00 AM", 
+                            "place": "Name of Restaurant/Hotel/Site", 
+                            "desc": "Detailed description + local insider tip.", 
                             "cost": 0, 
-                            "duration": 90,
+                            "duration": 60,
                             "priority": "high",
-                            "energy": "medium",
+                            "energy": "low",
                             "coords": [0.0, 0.0]
                         }}
                     ]
