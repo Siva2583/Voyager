@@ -15,37 +15,21 @@ CORS(app)
 
 API_KEY = os.getenv("GOOGLE_API_KEY")
 
-if not API_KEY:
-    print("WARNING: No API Key found in Railway Variables")
-
 MODEL_CHAIN = [
     'models/gemini-2.0-flash-lite-preview-02-05', 
     'models/gemini-flash-latest',               
-    'models/gemini-2.5-flash-lite',               
     'models/gemini-2.0-flash',                   
-    'models/gemini-exp-1206',                    
     'models/gemini-pro-latest'                   
 ]
 
 def fetch_activity_details(activity, location_context):
     place_name = activity.get('place')
-    if not place_name:
-        return activity
-
+    if not place_name: return activity
     image_url = None
     try:
         clean_query = place_name.split('(')[0].strip()
         url = "https://en.wikipedia.org/w/api.php"
-        params = {
-            "action": "query",
-            "format": "json",
-            "generator": "search",
-            "gsrsearch": clean_query,
-            "gsrlimit": 1,
-            "prop": "pageimages",
-            "piprop": "thumbnail",
-            "pithumbsize": 800
-        }
+        params = {"action": "query", "format": "json", "generator": "search", "gsrsearch": clean_query, "gsrlimit": 1, "prop": "pageimages", "piprop": "thumbnail", "pithumbsize": 800}
         headers = {'User-Agent': 'VoyagerAI/1.0'}
         response = requests.get(url, params=params, headers=headers, timeout=2)
         data = response.json()
@@ -53,32 +37,17 @@ def fetch_activity_details(activity, location_context):
         for _, page_data in pages.items():
             if "thumbnail" in page_data:
                 image_url = page_data["thumbnail"]["source"]
-    except Exception:
-        pass
-
+    except: pass
     if not image_url:
         image_url = f"https://loremflickr.com/800/600/{clean_query.replace(' ', ',')},travel/all"
-    
     activity['image'] = image_url
-
     try:
         if 'coords' not in activity or activity['coords'] == [0.0, 0.0]:
             geolocator = ArcGIS(user_agent="VoyagerAI_App")
-            search_query = f"{clean_query}, {location_context}"
-            try:
-                loc = geolocator.geocode(search_query, timeout=3)
-                if loc:
-                    activity['coords'] = [loc.latitude, loc.longitude]
-                else:
-                    loc = geolocator.geocode(clean_query, timeout=3)
-                    if loc:
-                        activity['coords'] = [loc.latitude, loc.longitude]
-            except Exception:
-                pass
-    except Exception:
-        if 'coords' not in activity:
-            activity['coords'] = [0.0, 0.0]
-
+            loc = geolocator.geocode(f"{clean_query}, {location_context}", timeout=3)
+            activity['coords'] = [loc.latitude, loc.longitude] if loc else [0.0, 0.0]
+    except:
+        if 'coords' not in activity: activity['coords'] = [0.0, 0.0]
     return activity
 
 @app.route('/', methods=['GET'])
@@ -89,48 +58,26 @@ def home():
 def generate_itinerary():
     try:
         data = request.json
-        location = data.get('location')
-        days = data.get('days')
-        budget_tier = data.get('budget_tier', 'Medium') 
-        people = data.get('people', 1)
-        vibe = ", ".join(data.get('vibe', []))
-        total_budget = data.get('total_budget', 'Flexible') 
+        location, days = data.get('location'), data.get('days')
+        people, vibe = data.get('people', 1), ", ".join(data.get('vibe', []))
+        budget_tier, total_budget = data.get('budget_tier', 'Medium'), data.get('total_budget', 'Flexible')
 
-        budget_instruction = ""
-        if budget_tier == "Luxury":
-            budget_instruction = "Focus on premium 5-star experiences, private chauffeurs, and high-end dining."
-        elif budget_tier == "Budget":
-            budget_instruction = "Focus on affordable street food, hostels, and public transport. Keep individual activity costs minimal."
-        else:
-            budget_instruction = "Balanced mix of comfortable hotels and standard local dining."
-
-        # REALISTIC PROMPT: Strict location lock and logic-first generation
+        # NEW HYPER-REALISTIC PROMPT
         prompt = f"""
-        Act as a professional, hyper-local travel consultant for {location}.
-        
-        STRICT COMMAND: Your output must be 100% specific to {location}. 
-        If you suggest a place that is not physically within or immediately adjacent to {location}, the itinerary is considered a failure. 
-        Example: If location is Tirupati, do NOT mention Goa, beaches in North India, or unrelated monuments.
+        Act as a professional local travel consultant based in {location} with 10 years of experience.
+        You are designing a {days}-day realistic itinerary for {people} people with a {budget_tier} budget ({total_budget} INR).
 
-        TRIP SPECIFICATIONS:
-        - Target City: {location}
-        - Duration: {days} Days
-        - Group Size: {people} People
-        - Style: {vibe}
-        - Total Budget for Group: {total_budget} INR
-        - Class: {budget_tier} ({budget_instruction})
+        STRICT REALISM RULES:
+        1. NEIGHBORHOOD GROUPING: Group all activities each day within the SAME neighborhood or district to minimize transit time.
+        2. BUFFER TIME: Include realistic transit/wait times (30-60 mins) between activities. 
+        3. LOGICAL FLOW: Start the day at a major landmark and move to nearby hidden gems.
+        4. LOCAL PRO-TIPS: In each 'desc', include a 1-sentence local tip (e.g., 'Best time to visit', 'Hidden entrance', 'What to order').
+        5. GEOGRAPHIC LOCK: Only include places physically inside {location}. No hallucinations.
 
-        EXECUTION RULES:
-        1. Only include REAL, verified landmarks and establishments in {location}.
-        2. Ensure the "cost" field is a realistic PER PERSON estimate in INR for that specific activity.
-        3. All "coords" must be accurate [lat, lng] for the specific spots in {location}.
-        4. "total_budget" in the JSON must reflect the actual sum of all activities for {people} people.
-
-        OUTPUT FORMAT: Return ONLY a clean JSON object. No conversational text.
-        JSON SCHEMA:
+        DATA SCHEMA:
         {{
-            "trip_name": "A professional title for a {days}-day trip to {location}",
-            "total_budget": "Calculated total for {people} people",
+            "trip_name": "A realistic title for {location}",
+            "total_budget": "Estimated total cost for {people} travelers",
             "itinerary": [
                 {{
                     "day": 1,
@@ -138,13 +85,13 @@ def generate_itinerary():
                         {{ 
                             "id": "unique_id",
                             "time": "e.g. 09:00 AM", 
-                            "place": "Exact Name", 
-                            "desc": "2-sentence detailed insight including local tips", 
+                            "place": "Verified Landmark Name", 
+                            "desc": "Detailed description plus a local pro-tip.", 
                             "cost": 0, 
                             "duration": 90,
                             "priority": "high",
                             "energy": "medium",
-                            "coords": [lat, lng]
+                            "coords": [0.0, 0.0]
                         }}
                     ]
                 }}
@@ -156,40 +103,27 @@ def generate_itinerary():
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": { 
-                "temperature": 0.1, # Lowest temperature for maximum factual accuracy
+                "temperature": 0.1, 
                 "maxOutputTokens": 8000,
                 "response_mime_type": "application/json"
             }
         }
 
         for model_name in MODEL_CHAIN:
-            print(f"Executing with model: {model_name}...")
             url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
             try:
                 response = requests.post(url, headers=headers, json=payload, timeout=40)
                 if response.status_code == 200:
                     raw_text = response.json()['candidates'][0]['content']['parts'][0]['text']
                     trip_data = json.loads(raw_text.strip())
-                    
-                    all_activities = []
-                    if "itinerary" in trip_data:
-                        for day in trip_data['itinerary']:
-                            for activity in day.get('activities', []):
-                                all_activities.append(activity)
-                    
-                    # Fetching images and verifying coords via ArcGIS
+                    all_acts = [act for d in trip_data.get('itinerary', []) for act in d.get('activities', [])]
                     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                        futures = [executor.submit(fetch_activity_details, act, location) for act in all_activities]
+                        futures = [executor.submit(fetch_activity_details, act, location) for act in all_acts]
                         concurrent.futures.wait(futures)
-
                     return jsonify(trip_data)
-                elif response.status_code == 429:
-                    continue
-            except Exception:
-                continue
-
-        return jsonify({"error": "Engine Timeout. Please retry."}), 500
-
+                elif response.status_code == 429: continue
+            except: continue
+        return jsonify({"error": "Busy. Try again."}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
