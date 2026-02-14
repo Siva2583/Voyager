@@ -20,7 +20,7 @@ def add_cors_headers(response):
     response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
     return response
 
-API_KEY = os.getenv("GEMINI_API_KEY")
+API_KEY = os.getenv("GOOGLE_API_KEY")
 
 MODEL_CHAIN = [
     'gemini-1.5-flash',
@@ -63,12 +63,15 @@ def generate_itinerary():
         people, budget = data.get('people', 1), data.get('total_budget', 'Flexible')
         prompt = f"Plan {days} days in {location} for {people} (Budget: {budget}). Return ONLY JSON: {{'trip_name': '', 'total_budget': '', 'itinerary': [{{'day': 1, 'activities': [{{'id': '1', 'time': 'Morning', 'place': '', 'desc': '', 'cost': 0, 'duration': 60, 'priority': 'high', 'energy': 'medium', 'coords': [0,0]}}]}}]}}"
         payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.3, "maxOutputTokens": 3000}}
+        last_error = "Unknown"
         for model_name in MODEL_CHAIN:
             url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
             try:
                 response = requests.post(url, json=payload, timeout=25)
                 res_data = response.json()
-                if 'candidates' not in res_data: continue
+                if 'candidates' not in res_data:
+                    last_error = res_data.get('error', {}).get('message', 'Model Busy')
+                    continue
                 raw_text = res_data['candidates'][0]['content']['parts'][0]['text']
                 clean_text = raw_text.replace("```json", "").replace("```", "").strip()
                 trip_data = json.loads(clean_text)
@@ -76,8 +79,10 @@ def generate_itinerary():
                 with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                     executor.map(lambda act: fetch_activity_details(act, location), all_acts)
                 return jsonify(trip_data)
-            except: continue
-        return jsonify({"error": "Overwhelmed"}), 503
+            except Exception as inner_e:
+                last_error = str(inner_e)
+                continue
+        return jsonify({"error": f"AI Failure: {last_error}"}), 503
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
