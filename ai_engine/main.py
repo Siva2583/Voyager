@@ -32,7 +32,6 @@ def fetch_activity_details(activity, location_context):
     if not place_name:
         return activity
 
-    # 1. Get Image
     image_url = None
     try:
         clean_query = place_name.split('(')[0].strip()
@@ -62,7 +61,6 @@ def fetch_activity_details(activity, location_context):
     
     activity['image'] = image_url
 
-    # 2. Get Coords
     try:
         if 'coords' not in activity or activity['coords'] == [0.0, 0.0]:
             geolocator = ArcGIS(user_agent="VoyagerAI_App")
@@ -96,8 +94,6 @@ def generate_itinerary():
         budget_tier = data.get('budget_tier', 'Medium') 
         people = data.get('people', 1)
         vibe = ", ".join(data.get('vibe', []))
-        
-        # --- FIX: Capture the exact total budget number ---
         total_budget = data.get('total_budget', 'Flexible') 
 
         budget_instruction = ""
@@ -108,30 +104,34 @@ def generate_itinerary():
         else:
             budget_instruction = "Select balanced 3-4 star hotels, good local restaurants, and mix of paid/free activities."
 
-        # --- FIX: Updated Prompt with strict budget math instructions ---
+        # THE BEST PROMPT: Added strict geographic constraint to stop location mixing
         prompt = f"""
-        Act as a travel planner creating a {budget_tier.upper()} class trip.
-        Destination: {location} | Duration: {days} Days | Travelers: {people}
-        Vibe: {vibe}
+        Act as an expert local travel guide for {location.upper()}.
+        Your mission is to create a {budget_tier.upper()} class trip.
 
-        TOTAL TRIP BUDGET: {total_budget} INR.
-        IMPORTANT: This budget is for the ENTIRE GROUP of {people} people combined. 
-        Do NOT assume this is per person. The sum of all activity costs multiplied by {people} should ideally stay under {total_budget}.
+        STRICT GEOGRAPHIC BOUNDARY: 
+        All activities MUST be physically located within {location} or its immediate 20km radius. 
+        DO NOT suggest places in other cities or states (e.g., if the user asks for Tirupati, do NOT suggest Goa).
+        
+        TRIP DATA:
+        Destination: {location} | Duration: {days} Days | Travelers: {people} | Vibe: {vibe}
+        TOTAL TRIP BUDGET: {total_budget} INR for the group.
 
-        STRICT BUDGET RULE: {budget_instruction}
+        BUDGET MATH: {budget_instruction}
+        The sum of (activity cost * {people}) must be <= {total_budget}.
 
-        CRITICAL DATA RULES:
+        DATA SCHEMA RULES:
         1. **id**: Unique string.
         2. **duration**: Time in MINUTES.
         3. **priority**: "high", "medium", "low".
         4. **energy**: "high", "medium", "low".
-        5. **cost**: Estimated cost for this activity PER PERSON in INR.
-        6. **coords**: [Latitude, Longitude] or [0,0].
+        5. **cost**: PER PERSON cost in INR.
+        6. **coords**: [Latitude, Longitude].
 
         JSON SCHEMA:
         {{
-            "trip_name": "Creative Trip Title",
-            "total_budget": "Estimated Total Cost for Group",
+            "trip_name": "Unique title for {location}",
+            "total_budget": "Total calculated cost for {people} people",
             "itinerary": [
                 {{
                     "day": 1,
@@ -139,8 +139,8 @@ def generate_itinerary():
                         {{ 
                             "id": "act_1",
                             "time": "Morning", 
-                            "place": "Name", 
-                            "desc": "Short description", 
+                            "place": "Real place in {location}", 
+                            "desc": "Local insight about this place", 
                             "cost": 0, 
                             "duration": 60,
                             "priority": "high",
@@ -156,16 +156,22 @@ def generate_itinerary():
         headers = {"Content-Type": "application/json"}
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": { "temperature": 0.4, "maxOutputTokens": 8000 }
+            "generationConfig": { 
+                "temperature": 0.2, # Lower temperature = more factual, less "creative" drifting
+                "maxOutputTokens": 8000,
+                "response_mime_type": "application/json"
+            }
         }
 
         for model_name in MODEL_CHAIN:
             print(f"Trying model: {model_name}...")
             url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
             try:
-                response = requests.post(url, headers=headers, json=payload, timeout=30)
+                response = requests.post(url, headers=headers, json=payload, timeout=35)
                 if response.status_code == 200:
-                    clean_text = response.json()['candidates'][0]['content']['parts'][0]['text'].replace("```json", "").replace("```", "").strip()
+                    res_json = response.json()
+                    raw_text = res_json['candidates'][0]['content']['parts'][0]['text']
+                    clean_text = raw_text.replace("```json", "").replace("```", "").strip()
                     trip_data = json.loads(clean_text)
                     
                     all_activities = []
