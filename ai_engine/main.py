@@ -23,9 +23,8 @@ def add_cors_headers(response):
 API_KEY = os.getenv("GEMINI_API_KEY")
 
 MODEL_CHAIN = [
-    'models/gemini-2.0-flash-lite-preview-02-05', 
-    'models/gemini-flash-latest',                
-    'models/gemini-2.0-flash'
+    'gemini-1.5-flash',
+    'gemini-1.5-pro'
 ]
 
 def fetch_activity_details(activity, location_context):
