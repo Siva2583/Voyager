@@ -60,39 +60,30 @@ function TripForm() {
             total_budget: budgetDisplay 
         };
 
-        const handleSubmit = async () => {
-    const tripdata = {
-        location: location,
-        days: days,
-        budget_tier: budgetTier,
-        people: travelers,
-        vibe: selectedVibes,
-        total_budget: budgetDisplay 
-    };
-
-    try {
-        setLoad(true);
-        navigate('/loading', { replace: true });
-        const response = await axios.post("https://web-production-d8a79.up.railway.app/generate", tripdata, {
-            timeout: 100000 
-        });
-        
-        setLoad(false);
-        navigate('/result', {
-            replace: true,
-            state: {
-                trip: response.data,
-                locationName: location,
-                people: travelers,
-                totalBudget: budgetDisplay
-            }
-        });
-    } catch (e) {
-        setLoad(false);
-        console.error("Full Error Info:", e);
-        alert("Trip generation failed: " + (e.response?.data?.error || "Server timed out. Please try again."));
-        navigate('/'); 
-    }
+        try {
+            setLoad(true);
+            navigate('/loading', { replace: true });
+            
+            const response = await axios.post("https://web-production-d8a79.up.railway.app/generate", tripdata, {
+                timeout: 100000 
+            });
+            
+            setLoad(false);
+            navigate('/result', {
+                replace: true,
+                state: {
+                    trip: response.data,
+                    locationName: location,
+                    people: travelers,
+                    totalBudget: budgetDisplay
+                }
+            });
+        } catch (e) {
+            setLoad(false);
+            console.error("Full Error Info:", e);
+            alert("Trip generation failed: " + (e.response?.data?.error || "Server timed out. Please try again."));
+            navigate('/'); 
+        }
     };
 
     return (
@@ -109,7 +100,6 @@ function TripForm() {
         -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
     }
 
-    /* --- DESKTOP STYLES (Default) --- */
     .home {
         height: 100vh;
         background: linear-gradient(rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.8)), url("https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=2072&auto=format&fit=crop");
@@ -268,7 +258,6 @@ function TripForm() {
                                         Trip to <span className="preview-highlight">{location}</span>
                                     </strong>
                                     <div style={{marginBottom:'8px'}}>
-                                        {/* Updated Label */}
                                         💰 Total Trip Budget: <span className="preview-highlight">{budgetTier}</span> 
                                         <span style={{fontSize:'0.9em', opacity:0.7}}> (₹{Number(budgetDisplay).toLocaleString("en-IN")})</span>
                                     </div>
