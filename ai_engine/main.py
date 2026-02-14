@@ -61,11 +61,9 @@ def generate_itinerary():
         if not data: return jsonify({"error": "No data"}), 400
         location, days = data.get('location', 'India'), data.get('days', 3)
         people, budget = data.get('people', 1), data.get('total_budget', 'Flexible')
-        
-        # Updated prompt to explicitly request valid JSON only
-        prompt = f"Plan {days} days in {location} for {people} (Budget: {budget}). Return ONLY valid JSON. Structure: {{'trip_name': '', 'total_budget': '', 'itinerary': [{{'day': 1, 'activities': [{{'id': '1', 'time': 'Morning', 'place': '', 'desc': '', 'cost': 0, 'duration': 60, 'priority': 'high', 'energy': 'medium', 'coords': [0,0]}}]}}]}}"
-        
-        # Added response_mime_type to guarantee JSON output
+
+        prompt = f"Plan {days} days in {location} for {people} (Budget: {budget}). Return ONLY JSON: {{'trip_name': '', 'total_budget': '', 'itinerary': [{{'day': 1, 'activities': [{{'id': '1', 'time': 'Morning', 'place': '', 'desc': '', 'cost': 0, 'duration': 60, 'coords': [0,0]}}]}}]}}"
+       
         payload = {
             "contents": [{"parts": [{"text": prompt}]}], 
             "generationConfig": {
@@ -84,11 +82,10 @@ def generate_itinerary():
                 if 'candidates' not in res_data:
                     last_error = res_data.get('error', {}).get('message', 'Model Busy')
                     continue
-                raw_text = res_data['candidates'][0]['content']['parts'][0]['text']
                 
-                # Safe parsing to handle Gemini's JSON response mode
-                clean_text = raw_text.strip()
-                trip_data = json.loads(clean_text)
+                raw_text = res_data['candidates'][0]['content']['parts'][0]['text']
+                # Stripping any leftover whitespace to ensure clean JSON parsing
+                trip_data = json.loads(raw_text.strip())
                 
                 all_acts = [act for day in trip_data.get('itinerary', []) for act in day.get('activities', [])]
                 with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
