@@ -1,8 +1,0 @@
-[phases.setup]
-nixPkgs = ["nodePackages.npm"]
-
-[phases.build]
-cmds = ["npm install", "npm run build"]
-
-[start]
-cmd = "npx serve -s dist -p $PORT"
