@@ -15,13 +15,16 @@ CORS(app)
 
 API_KEY = os.getenv("GOOGLE_API_KEY")
 
+if not API_KEY:
+    print("WARNING: No API Key found in Railway Variables")
+
 MODEL_CHAIN = [
     'models/gemini-2.0-flash-lite-preview-02-05', 
     'models/gemini-flash-latest',               
     'models/gemini-2.5-flash-lite',               
     'models/gemini-2.0-flash',                   
     'models/gemini-exp-1206',                    
-    'models/gemini-pro-latest'                    
+    'models/gemini-pro-latest'                   
 ]
 
 def fetch_activity_details(activity, location_context):
@@ -29,6 +32,7 @@ def fetch_activity_details(activity, location_context):
     if not place_name:
         return activity
 
+    # 1. Get Image
     image_url = None
     try:
         clean_query = place_name.split('(')[0].strip()
@@ -58,6 +62,7 @@ def fetch_activity_details(activity, location_context):
     
     activity['image'] = image_url
 
+    # 2. Get Coords
     try:
         if 'coords' not in activity or activity['coords'] == [0.0, 0.0]:
             geolocator = ArcGIS(user_agent="VoyagerAI_App")
@@ -91,6 +96,8 @@ def generate_itinerary():
         budget_tier = data.get('budget_tier', 'Medium') 
         people = data.get('people', 1)
         vibe = ", ".join(data.get('vibe', []))
+        
+        # --- FIX: Capture the exact total budget number ---
         total_budget = data.get('total_budget', 'Flexible') 
 
         budget_instruction = ""
@@ -101,6 +108,7 @@ def generate_itinerary():
         else:
             budget_instruction = "Select balanced 3-4 star hotels, good local restaurants, and mix of paid/free activities."
 
+        # --- FIX: Updated Prompt with strict budget math instructions ---
         prompt = f"""
         Act as a travel planner creating a {budget_tier.upper()} class trip.
         Destination: {location} | Duration: {days} Days | Travelers: {people}
@@ -148,20 +156,16 @@ def generate_itinerary():
         headers = {"Content-Type": "application/json"}
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": { 
-                "temperature": 0.4, 
-                "maxOutputTokens": 8000,
-                "response_mime_type": "application/json"
-            }
+            "generationConfig": { "temperature": 0.4, "maxOutputTokens": 8000 }
         }
 
         for model_name in MODEL_CHAIN:
+            print(f"Trying model: {model_name}...")
             url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
             try:
                 response = requests.post(url, headers=headers, json=payload, timeout=30)
                 if response.status_code == 200:
-                    raw_text = response.json()['candidates'][0]['content']['parts'][0]['text']
-                    clean_text = raw_text.replace("```json", "").replace("```", "").strip()
+                    clean_text = response.json()['candidates'][0]['content']['parts'][0]['text'].replace("```json", "").replace("```", "").strip()
                     trip_data = json.loads(clean_text)
                     
                     all_activities = []
