@@ -61,40 +61,45 @@ def generate_itinerary():
         if not data: return jsonify({"error": "No data"}), 400
         location, days = data.get('location', 'India'), data.get('days', 3)
         people, budget = data.get('people', 1), data.get('total_budget', 'Flexible')
-
-        prompt = f"Plan {days} days in {location} for {people} (Budget: {budget}). Return ONLY JSON: {{'trip_name': '', 'total_budget': '', 'itinerary': [{{'day': 1, 'activities': [{{'id': '1', 'time': 'Morning', 'place': '', 'desc': '', 'cost': 0, 'duration': 60, 'coords': [0,0]}}]}}]}}"
-       
+        
+        # PROMPT: Added instruction to avoid markdown which causes the "char 0" error
+        prompt = f"Plan {days} days in {location} for {people} (Budget: {budget}). Return ONLY a valid JSON object. Do not use ```json blocks. Structure: {{'trip_name': '', 'total_budget': '', 'itinerary': [{{'day': 1, 'activities': [{{'id': '1', 'time': 'Morning', 'place': '', 'desc': '', 'cost': 0, 'duration': 60, 'coords': [0,0]}}]}}]}}"
+        
+        # PAYLOAD: Added response_mime_type to force the API to send JSON
         payload = {
             "contents": [{"parts": [{"text": prompt}]}], 
             "generationConfig": {
-                "temperature": 0.2, 
-                "maxOutputTokens": 2000,
+                "temperature": 0.1, 
+                "maxOutputTokens": 1000,
                 "response_mime_type": "application/json"
             }
         }
         
-        last_error = "Unknown"
+        last_err = "Unknown"
         for model_name in MODEL_CHAIN:
-            url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
+            url = f"[https://generativelanguage.googleapis.com/v1beta/](https://generativelanguage.googleapis.com/v1beta/){model_name}:generateContent?key={API_KEY}"
             try:
-                response = requests.post(url, json=payload, timeout=25)
-                res_data = response.json()
-                if 'candidates' not in res_data:
-                    last_error = res_data.get('error', {}).get('message', 'Model Busy')
+                # Reduced timeout to catch failures faster and try the next model
+                response = requests.post(url, json=payload, timeout=20)
+                res_json = response.json()
+                
+                if 'candidates' not in res_json:
+                    last_err = res_json.get('error', {}).get('message', 'API Error')
                     continue
                 
-                raw_text = res_data['candidates'][0]['content']['parts'][0]['text']
-                # Stripping any leftover whitespace to ensure clean JSON parsing
+                # Directly load the text without replaces since response_mime_type handles it
+                raw_text = res_json['candidates'][0]['content']['parts'][0]['text']
                 trip_data = json.loads(raw_text.strip())
                 
                 all_acts = [act for day in trip_data.get('itinerary', []) for act in day.get('activities', [])]
-                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                     executor.map(lambda act: fetch_activity_details(act, location), all_acts)
                 return jsonify(trip_data)
-            except Exception as inner_e:
-                last_error = str(inner_e)
+            except Exception as e:
+                last_err = str(e)
                 continue
-        return jsonify({"error": f"AI Failure: {last_error}"}), 503
+        
+        return jsonify({"error": f"AI Failure: {last_err}"}), 503
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
