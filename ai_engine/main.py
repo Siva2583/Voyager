@@ -11,14 +11,14 @@ from geopy.geocoders import ArcGIS
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 API_KEY = os.getenv("GOOGLE_API_KEY")
 
 MODEL_CHAIN = [
-    'gemini-2.5-flash',       
-    'gemini-2.5-pro',       
-    'gemini-2.0-flash-001'   
+    'gemini-2.5-flash', 
+    'gemini-2.5-pro', 
+    'gemini-2.0-flash-001'
 ]
 
 def fetch_activity_details(activity, location_context):
@@ -60,6 +60,7 @@ def generate_itinerary():
         location, days = data.get('location'), data.get('days')
         people, vibe = data.get('people', 1), ", ".join(data.get('vibe', []))
         budget_tier, total_budget = data.get('budget_tier', 'Medium'), data.get('total_budget', 'Flexible')
+        
         prompt = f"""
         Act as a professional local travel consultant in {location}. 
         Create a COMPLETE {days}-day "everything included" itinerary for {people} people.
@@ -118,7 +119,7 @@ def generate_itinerary():
                     raw_text = response.json()['candidates'][0]['content']['parts'][0]['text']
                     trip_data = json.loads(raw_text.strip())
                     all_acts = [act for d in trip_data.get('itinerary', []) for act in d.get('activities', [])]
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
                         futures = [executor.submit(fetch_activity_details, act, location) for act in all_acts]
                         concurrent.futures.wait(futures)
                     return jsonify(trip_data)
