@@ -11,7 +11,7 @@ from geopy.geocoders import ArcGIS
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app) 
 
 API_KEY = os.getenv("GOOGLE_API_KEY")
 
@@ -31,7 +31,8 @@ def fetch_activity_details(activity, location_context):
         url = "https://en.wikipedia.org/w/api.php"
         params = {"action": "query", "format": "json", "generator": "search", "gsrsearch": clean_query, "gsrlimit": 1, "prop": "pageimages", "piprop": "thumbnail", "pithumbsize": 800}
         headers = {'User-Agent': 'VoyagerAI/1.0'}
-        response = requests.get(url, params=params, headers=headers, timeout=2)
+        # Removed timeout to ensure details are always fetched
+        response = requests.get(url, params=params, headers=headers)
         data = response.json()
         pages = data.get("query", {}).get("pages", {})
         for _, page_data in pages.items():
@@ -44,7 +45,7 @@ def fetch_activity_details(activity, location_context):
     try:
         if 'coords' not in activity or activity['coords'] == [0.0, 0.0]:
             geolocator = ArcGIS(user_agent="VoyagerAI_App")
-            loc = geolocator.geocode(f"{clean_query}, {location_context}", timeout=3)
+            loc = geolocator.geocode(f"{clean_query}, {location_context}")
             activity['coords'] = [loc.latitude, loc.longitude] if loc else [0.0, 0.0]
     except:
         if 'coords' not in activity: activity['coords'] = [0.0, 0.0]
@@ -115,18 +116,19 @@ def generate_itinerary():
         for model_name in MODEL_CHAIN:
             url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
             try:
-                response = requests.post(url, headers=headers, json=payload, timeout=40)
+                response = requests.post(url, headers=headers, json=payload)
                 if response.status_code == 200:
                     raw_text = response.json()['candidates'][0]['content']['parts'][0]['text']
                     trip_data = json.loads(raw_text.strip())
                     all_acts = [act for d in trip_data.get('itinerary', []) for act in d.get('activities', [])]
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+       
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                         futures = [executor.submit(fetch_activity_details, act, location) for act in all_acts]
                         concurrent.futures.wait(futures)
                     return jsonify(trip_data)
                 elif response.status_code == 429: continue
             except: continue
-        return jsonify({"error": "Busy. Try again."}), 500
+        return jsonify({"error": "Service busy. Please try again in 10 seconds."}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
