@@ -7,7 +7,7 @@ Voyager is a full-stack AI application that generates personalized, day-by-day t
 ---
 
 ## 🚀 Live Demo
-* **Live App:** [Click here to view Voyager](https://voyager-cvaoouues-siva2583s-projects.vercel.app/)
+* **Live App:** [Click here to view Voyager](https://voyager-dgby.vercel.app/)
 * **Demo Video:** [Watch the LinkedIn Demo](https://www.linkedin.com/posts/siva-charan-kg-72a900284_traveltech-generativeai-llm-ugcPost-7425072513896017920-r3tk?utm_source=social_share_send&utm_medium=member_desktop_web&rcm=ACoAAEUwcBIBYZx7vtPdyBheEgwy-2h1eIttfnA)
 
 ---
