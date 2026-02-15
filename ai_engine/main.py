@@ -11,15 +11,14 @@ from geopy.geocoders import ArcGIS
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app)
 
 API_KEY = os.getenv("GOOGLE_API_KEY")
 
 MODEL_CHAIN = [
-    'models/gemini-2.0-flash-lite-preview-02-05', 
-    'models/gemini-flash-latest',               
-    'models/gemini-2.0-flash',                   
-    'models/gemini-pro-latest'                   
+    'gemini-1.5-flash',
+    'gemini-1.5-pro', 
+    'gemini-pro'       
 ]
 
 def fetch_activity_details(activity, location_context):
@@ -31,6 +30,7 @@ def fetch_activity_details(activity, location_context):
         url = "https://en.wikipedia.org/w/api.php"
         params = {"action": "query", "format": "json", "generator": "search", "gsrsearch": clean_query, "gsrlimit": 1, "prop": "pageimages", "piprop": "thumbnail", "pithumbsize": 800}
         headers = {'User-Agent': 'VoyagerAI/1.0'}
+        # Removed timeout to ensure data is fetched
         response = requests.get(url, params=params, headers=headers)
         data = response.json()
         pages = data.get("query", {}).get("pages", {})
@@ -62,20 +62,16 @@ def generate_itinerary():
         people, vibe = data.get('people', 1), ", ".join(data.get('vibe', []))
         budget_tier, total_budget = data.get('budget_tier', 'Medium'), data.get('total_budget', 'Flexible')
 
-        prompt = f"Plan {days} days in {location} for {people} travelers. Budget: {total_budget}. Include hotels, restaurants, and sightseeing. Return JSON."
+        prompt = f"Plan {days} days in {location} for {people} people. Budget: {total_budget}. Include specific hotels, local restaurants, and sightseeing. Return ONLY JSON."
 
         headers = {"Content-Type": "application/json"}
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": { 
-                "temperature": 0.1, 
-                "maxOutputTokens": 8000,
-                "response_mime_type": "application/json"
-            }
+            "generationConfig": { "temperature": 0.1, "response_mime_type": "application/json" }
         }
 
         for model_name in MODEL_CHAIN:
-            url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
+            url = f"https://generativelanguage.googleapis.com/v1/models/{model_name}:generateContent?key={API_KEY}"
             try:
                 response = requests.post(url, headers=headers, json=payload)
                 if response.status_code == 200:
@@ -88,8 +84,7 @@ def generate_itinerary():
                     return jsonify(trip_data)
                 elif response.status_code == 429: continue
             except: continue
-        
-        return jsonify({"error": "AI processing took too long, try again."}), 500
+        return jsonify({"error": "AI failed to respond. Please try again."}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
