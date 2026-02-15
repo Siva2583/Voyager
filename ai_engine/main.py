@@ -62,7 +62,7 @@ def generate_itinerary():
         people, vibe = data.get('people', 1), ", ".join(data.get('vibe', []))
         budget_tier, total_budget = data.get('budget_tier', 'Medium'), data.get('total_budget', 'Flexible')
 
-        prompt = f"Plan {days} days in {location} for {people} (Budget: {total_budget} INR). Provide a REALISTIC itinerary with hotels, breakfast, lunch, dinner, and sightseeing. Return ONLY JSON."
+        prompt = f"Plan {days} days in {location} for {people} travelers. Budget: {total_budget}. Include hotels, restaurants, and sightseeing. Return JSON."
 
         headers = {"Content-Type": "application/json"}
         payload = {
@@ -88,7 +88,8 @@ def generate_itinerary():
                     return jsonify(trip_data)
                 elif response.status_code == 429: continue
             except: continue
-        return jsonify({"error": "Service busy"}), 500
+        
+        return jsonify({"error": "AI processing took too long, try again."}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
