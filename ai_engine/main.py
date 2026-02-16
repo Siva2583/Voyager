@@ -1,22 +1,32 @@
-import requests
-import time
-import json
 import os
+import json
+import requests
 import concurrent.futures
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from dotenv import load_dotenv
-from geopy.geocoders import ArcGIS 
+from geopy.geocoders import ArcGIS
 
 load_dotenv()
 
 app = Flask(__name__)
-# 1. Allow all users so friends' browsers don't block requests
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app, resources={r"/*": {
+    "origins": ["https://voyager-slvc.vercel.app", "https://voyager-dgby.vercel.app"],
+    "methods": ["GET", "POST", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization"]
+}})
+
+# Manual preflight handler for extra stability
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        res = make_response()
+        res.headers.add("Access-Control-Allow-Origin", request.headers.get("Origin", "*"))
+        res.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        res.headers.add("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+        return res, 204
 
 API_KEY = os.getenv("GOOGLE_API_KEY")
-
-# 2. Using the exact stable models from your curl list
 MODEL_CHAIN = [
     'gemini-2.5-flash', 
     'gemini-2.5-pro',
