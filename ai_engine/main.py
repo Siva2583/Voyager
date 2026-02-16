@@ -11,29 +11,35 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Fixed CORS: Use a wildcard for testing to eliminate origin issues
-CORS(app, resources={r"/*": {"origins": "*"}})
+# STRONGEST CORS: Specifically allow all your Vercel domains
+CORS(app, resources={r"/*": {
+    "origins": [
+        "https://voyager-dgby.vercel.app", 
+        "https://voyager-slvc.vercel.app", 
+        "https://voyager-ycjf.vercel.app"
+    ],
+    "methods": ["GET", "POST", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization"]
+}})
+
+# IMMEDIATE PREFLIGHT HANDLER: Stops the "2-second" crash
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        res = make_response()
+        res.headers.add("Access-Control-Allow-Origin", "*")
+        res.headers.add("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+        res.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        return res, 204
 
 API_KEY = os.getenv("GOOGLE_API_KEY")
 MODEL_CHAIN = ['gemini-1.5-flash', 'gemini-2.0-flash-001']
 
-# IMMEDIATE PREFLIGHT RESPONSE: This stops the 20-second CORS crash
-@app.route('/generate', methods=['OPTIONS'])
-def handle_options():
-    res = make_response()
-    res.headers["Access-Control-Allow-Origin"] = "*"
-    res.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
-    res.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    return res, 204
-
 def fetch_activity_details(activity, location_context):
-    place_name = activity.get('place')
-    if not place_name: return activity
-    # Fast placeholder to prevent worker hang
+    place_name = activity.get('place', 'Unknown')
     activity['image'] = f"https://loremflickr.com/800/600/{place_name.replace(' ', ',')},travel"
     try:
-        geolocator = ArcGIS(user_agent="Voyager_App")
-        # Tight 3s timeout: If geocoding is slow, move on
+        geolocator = ArcGIS(user_agent="VoyagerAI_App")
         loc = geolocator.geocode(f"{place_name}, {location_context}", timeout=3)
         activity['coords'] = [loc.latitude, loc.longitude] if loc else [0.0, 0.0]
     except:
@@ -50,19 +56,17 @@ def generate_itinerary():
         for model in MODEL_CHAIN:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={API_KEY}"
             try:
-                # Use a session for faster connection reuse
-                with requests.Session() as s:
-                    response = s.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=25)
-                    if response.status_code == 200:
-                        raw_data = response.json()['candidates'][0]['content']['parts'][0]['text']
-                        trip_data = json.loads(raw_data.strip('`json \n'))
-                        
-                        acts = [a for d in trip_data.get('itinerary', []) for a in d.get('activities', [])]
-                        # Use fewer workers (3) to avoid overloading Railway CPU/RAM
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                            executor.map(lambda a: fetch_activity_details(a, location), acts)
-                        
-                        return jsonify(trip_data)
+                response = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=25)
+                if response.status_code == 200:
+                    raw_text = response.json()['candidates'][0]['content']['parts'][0]['text']
+                    trip_data = json.loads(raw_text.strip('`json \n'))
+                    
+                    acts = [a for d in trip_data.get('itinerary', []) for a in d.get('activities', [])]
+                    # Keep workers low (3) so Railway doesn't run out of memory
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                        executor.map(lambda a: fetch_activity_details(a, location), acts)
+                    
+                    return jsonify(trip_data)
             except:
                 continue
         
