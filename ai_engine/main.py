@@ -10,69 +10,143 @@ from geopy.geocoders import ArcGIS
 load_dotenv()
 
 app = Flask(__name__)
-
-# STRONGEST CORS: Specifically allow all your Vercel domains
 CORS(app, resources={r"/*": {
-    "origins": [
-        "https://voyager-dgby.vercel.app", 
-        "https://voyager-slvc.vercel.app", 
-        "https://voyager-ycjf.vercel.app"
-    ],
+    "origins": ["https://voyager-slvc.vercel.app", "https://voyager-dgby.vercel.app"],
     "methods": ["GET", "POST", "OPTIONS"],
     "allow_headers": ["Content-Type", "Authorization"]
 }})
 
-# IMMEDIATE PREFLIGHT HANDLER: Stops the "2-second" crash
+# Manual preflight handler for extra stability
 @app.before_request
 def handle_preflight():
     if request.method == "OPTIONS":
         res = make_response()
-        res.headers.add("Access-Control-Allow-Origin", "*")
-        res.headers.add("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+        res.headers.add("Access-Control-Allow-Origin", request.headers.get("Origin", "*"))
         res.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        res.headers.add("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
         return res, 204
 
 API_KEY = os.getenv("GOOGLE_API_KEY")
-MODEL_CHAIN = ['gemini-1.5-flash', 'gemini-2.0-flash-001']
+MODEL_CHAIN = [
+    'gemini-2.5-flash', 
+    'gemini-2.5-pro',
+    'gemini-2.0-flash-001'
+]
 
 def fetch_activity_details(activity, location_context):
-    place_name = activity.get('place', 'Unknown')
-    activity['image'] = f"https://loremflickr.com/800/600/{place_name.replace(' ', ',')},travel"
+    place_name = activity.get('place')
+    if not place_name: return activity
+    image_url = None
     try:
-        geolocator = ArcGIS(user_agent="VoyagerAI_App")
-        loc = geolocator.geocode(f"{place_name}, {location_context}", timeout=3)
-        activity['coords'] = [loc.latitude, loc.longitude] if loc else [0.0, 0.0]
+        clean_query = place_name.split('(')[0].strip()
+        url = "https://en.wikipedia.org/w/api.php"
+        params = {"action": "query", "format": "json", "generator": "search", "gsrsearch": clean_query, "gsrlimit": 1, "prop": "pageimages", "piprop": "thumbnail", "pithumbsize": 800}
+        headers = {'User-Agent': 'VoyagerAI/1.0'}
+        # Removed timeout to ensure details are always fetched for every user
+        response = requests.get(url, params=params, headers=headers)
+        data = response.json()
+        pages = data.get("query", {}).get("pages", {})
+        for _, page_data in pages.items():
+            if "thumbnail" in page_data:
+                image_url = page_data["thumbnail"]["source"]
+    except: pass
+    if not image_url:
+        image_url = f"https://loremflickr.com/800/600/{clean_query.replace(' ', ',')},travel/all"
+    activity['image'] = image_url
+    try:
+        if 'coords' not in activity or activity['coords'] == [0.0, 0.0]:
+            geolocator = ArcGIS(user_agent="VoyagerAI_App")
+            # Removed timeout for reliability in concurrent requests
+            loc = geolocator.geocode(f"{clean_query}, {location_context}")
+            activity['coords'] = [loc.latitude, loc.longitude] if loc else [0.0, 0.0]
     except:
-        activity['coords'] = [0.0, 0.0]
+        if 'coords' not in activity: activity['coords'] = [0.0, 0.0]
     return activity
+
+@app.route('/', methods=['GET'])
+def home():
+    return "Voyager AI Engine Running", 200
 
 @app.route('/generate', methods=['POST'])
 def generate_itinerary():
     try:
         data = request.json
-        location = data.get('location')
-        prompt = f"Plan a trip to {location}. Return ONLY JSON."
+        location, days = data.get('location'), data.get('days')
+        people, vibe = data.get('people', 1), ", ".join(data.get('vibe', []))
+        budget_tier, total_budget = data.get('budget_tier', 'Medium'), data.get('total_budget', 'Flexible')
 
-        for model in MODEL_CHAIN:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={API_KEY}"
+        # HYPER-REALISTIC "EVERYTHING" PROMPT
+        prompt = f"""
+        Act as a professional local travel consultant in {location}. 
+        Create a COMPLETE {days}-day "everything included" itinerary for {people} people.
+        Budget: {budget_tier} ({total_budget} INR).
+
+        STRICT REALISM RULES:
+        1. INCLUDE EVERYTHING: Every day MUST include:
+           - A specific verified Hotel/Resort for 'Check-in & Rest'.
+           - Specific local Restaurants for 'Breakfast', 'Lunch', and 'Dinner'.
+           - 2-3 Sightseeing activities.
+        2. NEIGHBORHOOD LOCK: Group the hotel, restaurants, and activities in the same area each day to avoid traffic.
+        3. REAL PLACES ONLY: Use real, verified establishments in {location}.
+        4. COST ACCURACY: 'cost' must be a realistic estimate PER PERSON (e.g., Special Entry Darshan is 300 INR).
+        5. LOCAL TIPS: In each 'desc', include a pro-tip like 'Book 3 months early' or 'Order the Ghee Roast'.
+
+        JSON SCHEMA:
+        {{
+            "trip_name": "Authentic Journey: {location}",
+            "total_budget": "Total for {people} travelers",
+            "itinerary": [
+                {{
+                    "day": 1,
+                    "activities": [
+                        {{ 
+                            "id": "unique_id",
+                            "time": "08:00 AM", 
+                            "place": "Verified Name", 
+                            "desc": "Local insight + Insider Tip.", 
+                            "cost": 0, 
+                            "duration": 60,
+                            "priority": "high",
+                            "energy": "low",
+                            "coords": [0.0, 0.0]
+                        }}
+                    ]
+                }}
+            ]
+        }}
+        """
+
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": { 
+                "temperature": 0.1, 
+                "maxOutputTokens": 8000,
+                "response_mime_type": "application/json"
+            }
+        }
+
+        for model_name in MODEL_CHAIN:
+            # Using stable v1beta path as confirmed by your curl
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={API_KEY}"
             try:
-                response = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=25)
+                # 3. Removed timeout to allow long AI thinking
+                response = requests.post(url, headers=headers, json=payload)
                 if response.status_code == 200:
                     raw_text = response.json()['candidates'][0]['content']['parts'][0]['text']
-                    trip_data = json.loads(raw_text.strip('`json \n'))
-                    
-                    acts = [a for d in trip_data.get('itinerary', []) for a in d.get('activities', [])]
-                    # Keep workers low (3) so Railway doesn't run out of memory
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                        executor.map(lambda a: fetch_activity_details(a, location), acts)
-                    
+                    trip_data = json.loads(raw_text.strip())
+                    all_acts = [act for d in trip_data.get('itinerary', []) for act in d.get('activities', [])]
+                    # 4. Increased max_workers to handle multiple concurrent users
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                        futures = [executor.submit(fetch_activity_details, act, location) for act in all_acts]
+                        concurrent.futures.wait(futures)
                     return jsonify(trip_data)
-            except:
-                continue
-        
-        return jsonify({"error": "Service busy"}), 503
+                elif response.status_code == 429: continue
+            except: continue
+        return jsonify({"error": "Service busy. Try again."}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
