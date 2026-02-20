@@ -11,7 +11,7 @@ load_dotenv()
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {
-    "origins": ["https://voyager-slvc.vercel.app", "https://voyager-dgby.vercel.app"],
+    "origins": ["https://voyager-zkw8.onrender.com"],
     "methods": ["GET", "POST", "OPTIONS"],
     "allow_headers": ["Content-Type", "Authorization"]
 }})
