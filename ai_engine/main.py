@@ -10,8 +10,10 @@ from geopy.geocoders import ArcGIS
 load_dotenv()
 
 app = Flask(__name__)
+
+# UPDATED CORS: Added the new Render URL to allowed origins for stability
 CORS(app, resources={r"/*": {
-    "origins": ["https://voyager-zkw8.onrender.com"],
+    "origins": ["https://voyager-zkw8.onrender.com", "https://voyager-slvc.vercel.app", "https://voyager-dgby.vercel.app"],
     "methods": ["GET", "POST", "OPTIONS"],
     "allow_headers": ["Content-Type", "Authorization"]
 }})
@@ -26,6 +28,8 @@ def handle_preflight():
         return res, 204
 
 API_KEY = os.getenv("GOOGLE_API_KEY")
+
+# Consistent model chain for high-quality itinerary generation
 MODEL_CHAIN = [
     'gemini-2.5-flash', 
     'gemini-2.5-pro',
@@ -41,7 +45,7 @@ def fetch_activity_details(activity, location_context):
         url = "https://en.wikipedia.org/w/api.php"
         params = {"action": "query", "format": "json", "generator": "search", "gsrsearch": clean_query, "gsrlimit": 1, "prop": "pageimages", "piprop": "thumbnail", "pithumbsize": 800}
         headers = {'User-Agent': 'VoyagerAI/1.0'}
-        response = requests.get(url, params=params, headers=headers)
+        response = requests.get(url, params=params, headers=headers, timeout=5)
         data = response.json()
         pages = data.get("query", {}).get("pages", {})
         for _, page_data in pages.items():
@@ -54,7 +58,7 @@ def fetch_activity_details(activity, location_context):
     try:
         if 'coords' not in activity or activity['coords'] == [0.0, 0.0]:
             geolocator = ArcGIS(user_agent="VoyagerAI_App")
-            loc = geolocator.geocode(f"{clean_query}, {location_context}")
+            loc = geolocator.geocode(f"{clean_query}, {location_context}", timeout=5)
             activity['coords'] = [loc.latitude, loc.longitude] if loc else [0.0, 0.0]
     except:
         if 'coords' not in activity: activity['coords'] = [0.0, 0.0]
@@ -69,7 +73,7 @@ def generate_itinerary():
     try:
         data = request.json
         location, days = data.get('location'), data.get('days')
-        people, vibe = data.get('people', 1), ", ".join(data.get('vibe', []))
+        people = data.get('people', 1)
         budget_tier, total_budget = data.get('budget_tier', 'Medium'), data.get('total_budget', 'Flexible')
 
         prompt = f"""
@@ -125,11 +129,14 @@ def generate_itinerary():
         for model_name in MODEL_CHAIN:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={API_KEY}"
             try:
-                response = requests.post(url, headers=headers, json=payload)
+                # 45s timeout to ensure we return data before Vercel's 60s hobby limit
+                response = requests.post(url, headers=headers, json=payload, timeout=45)
                 if response.status_code == 200:
                     raw_text = response.json()['candidates'][0]['content']['parts'][0]['text']
                     trip_data = json.loads(raw_text.strip())
                     all_acts = [act for d in trip_data.get('itinerary', []) for act in d.get('activities', [])]
+                    
+                    # Using a pool of 10 workers for concurrent image/coord fetching
                     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                         futures = [executor.submit(fetch_activity_details, act, location) for act in all_acts]
                         concurrent.futures.wait(futures)
