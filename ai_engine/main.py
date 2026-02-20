@@ -16,7 +16,6 @@ CORS(app, resources={r"/*": {
     "allow_headers": ["Content-Type", "Authorization"]
 }})
 
-# Manual preflight handler for extra stability
 @app.before_request
 def handle_preflight():
     if request.method == "OPTIONS":
@@ -42,7 +41,6 @@ def fetch_activity_details(activity, location_context):
         url = "https://en.wikipedia.org/w/api.php"
         params = {"action": "query", "format": "json", "generator": "search", "gsrsearch": clean_query, "gsrlimit": 1, "prop": "pageimages", "piprop": "thumbnail", "pithumbsize": 800}
         headers = {'User-Agent': 'VoyagerAI/1.0'}
-        # Removed timeout to ensure details are always fetched for every user
         response = requests.get(url, params=params, headers=headers)
         data = response.json()
         pages = data.get("query", {}).get("pages", {})
@@ -56,7 +54,6 @@ def fetch_activity_details(activity, location_context):
     try:
         if 'coords' not in activity or activity['coords'] == [0.0, 0.0]:
             geolocator = ArcGIS(user_agent="VoyagerAI_App")
-            # Removed timeout for reliability in concurrent requests
             loc = geolocator.geocode(f"{clean_query}, {location_context}")
             activity['coords'] = [loc.latitude, loc.longitude] if loc else [0.0, 0.0]
     except:
@@ -75,7 +72,6 @@ def generate_itinerary():
         people, vibe = data.get('people', 1), ", ".join(data.get('vibe', []))
         budget_tier, total_budget = data.get('budget_tier', 'Medium'), data.get('total_budget', 'Flexible')
 
-        # HYPER-REALISTIC "EVERYTHING" PROMPT
         prompt = f"""
         Act as a professional local travel consultant in {location}. 
         Create a COMPLETE {days}-day "everything included" itinerary for {people} people.
@@ -127,16 +123,13 @@ def generate_itinerary():
         }
 
         for model_name in MODEL_CHAIN:
-            # Using stable v1beta path as confirmed by your curl
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={API_KEY}"
             try:
-                # 3. Removed timeout to allow long AI thinking
                 response = requests.post(url, headers=headers, json=payload)
                 if response.status_code == 200:
                     raw_text = response.json()['candidates'][0]['content']['parts'][0]['text']
                     trip_data = json.loads(raw_text.strip())
                     all_acts = [act for d in trip_data.get('itinerary', []) for act in d.get('activities', [])]
-                    # 4. Increased max_workers to handle multiple concurrent users
                     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                         futures = [executor.submit(fetch_activity_details, act, location) for act in all_acts]
                         concurrent.futures.wait(futures)
@@ -148,5 +141,6 @@ def generate_itinerary():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
+    # Render assigns a port dynamically. Default to 5000 for local testing.
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
