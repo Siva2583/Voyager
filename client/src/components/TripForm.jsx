@@ -64,7 +64,7 @@ function TripForm() {
             setLoad(true);
             navigate('/loading', { replace: true });
             
-            const response = await axios.post("https://web-production-d8a79.up.railway.app/generate", tripdata, {
+            const response = await axios.post(import.meta.env.VITE_API_URL + "/generate", tripdata, {
                 timeout: 100000 
             });
             
