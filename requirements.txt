@@ -1,7 +1,6 @@
 flask
 flask-cors
-python-dotenv
 requests
 geopy
-google-generativeai
+python-dotenv
 gunicorn
