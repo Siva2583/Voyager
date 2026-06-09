@@ -125,20 +125,14 @@ def generate_itinerary():
         for model_name in MODEL_CHAIN:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={API_KEY}"
             try:
-                # 45s timeout to ensure we return data before Vercel's 60s hobby limit
                 response = requests.post(url, headers=headers, json=payload, timeout=45)
+                print(f"[{model_name}] Status: {response.status_code}, Body: {response.text[:300]}", flush=True)
                 if response.status_code == 200:
-                    raw_text = response.json()['candidates'][0]['content']['parts'][0]['text']
-                    trip_data = json.loads(raw_text.strip())
-                    all_acts = [act for d in trip_data.get('itinerary', []) for act in d.get('activities', [])]
-                    
-                    # Using a pool of 10 workers for concurrent image/coord fetching
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                        futures = [executor.submit(fetch_activity_details, act, location) for act in all_acts]
-                        concurrent.futures.wait(futures)
-                    return jsonify(trip_data)
+                    ...
                 elif response.status_code == 429: continue
-            except: continue
+            except Exception as ex:
+                print(f"[{model_name}] Exception: {ex}", flush=True)
+                continue
         return jsonify({"error": "Service busy. Try again."}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
