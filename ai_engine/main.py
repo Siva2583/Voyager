@@ -12,11 +12,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # UPDATED CORS: Added the new Render URL to allowed origins for stability
-CORS(app, resources={r"/*": {
-    "origins": ["https://voyager-zkw8.onrender.com", "https://voyager-slvc.vercel.app", "https://voyager-dgby.vercel.app"],
-    "methods": ["GET", "POST", "OPTIONS"],
-    "allow_headers": ["Content-Type", "Authorization"]
-}})
+CORS(app)
 
 @app.before_request
 def handle_preflight():
